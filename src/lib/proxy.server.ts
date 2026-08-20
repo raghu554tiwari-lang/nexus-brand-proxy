@@ -141,6 +141,21 @@ export async function proxyRequest(request: Request): Promise<Response> {
   const outHeaders = new Headers(upstream.headers);
   for (const key of STRIP_RESPONSE_HEADERS) outHeaders.delete(key);
 
+  // Never let deployment-pinning cookies reach the browser: they cause
+  // "404 DEPLOYMENT_NOT_FOUND" once that upstream deployment is gone.
+  const setCookies = (upstream.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie
+    ? (upstream.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+    : [];
+  if (setCookies.length) {
+    outHeaders.delete("set-cookie");
+    for (const value of setCookies) {
+      const name = value.split("=")[0]?.trim() ?? "";
+      if (STRIP_COOKIES.includes(name)) continue;
+      outHeaders.append("set-cookie", value);
+    }
+  }
+
+
   // Keep redirects on this domain.
   const location = upstream.headers.get("location");
   if (location) {
