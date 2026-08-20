@@ -66,7 +66,7 @@ export async function proxyRequest(request: Request): Promise<Response> {
     upstream = await fetch(target.toString(), {
       method: request.method,
       headers,
-      body: hasBody ? await request.arrayBuffer() : undefined,
+      body: hasBody ? await request.arrayBuffer() : null,
       redirect: "manual",
     });
   } catch (error) {
