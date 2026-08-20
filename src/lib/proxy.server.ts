@@ -7,21 +7,52 @@ const REPLACEMENTS: Array<[RegExp, string]> = [
   // Assets / links first (most specific)
   [/https:\/\/i\.ibb\.co\/YBbwNGxz\/Logo-pw-removebg-preview\.png/gi, NEW_LOGO],
   [/i\.ibb\.co\\?\/YBbwNGxz\\?\/Logo-pw-removebg-preview\.png/gi, NEW_LOGO.replace("https://", "")],
+  // Owner contact link
+  [/https?:\/\/telegram\.me\/Deltaverse_owner/gi, "https://t.me/officialmarco22"],
+  [/telegram\.me\/Deltaverse_owner/gi, "t.me/officialmarco22"],
+  // Channel link
   [/(https:\/\/)?t\.me\/official_marco_22/gi, "https://t.me/PWNexuss"],
   [/official_marco_22/gi, "PWNexuss"],
   // Branding
   [/PW[-_\s]?MARCO/g, "PW-NEXUS"],
   [/Pw[-_\s]?Marco/g, "PW-Nexus"],
   [/pw[-_\s]?marco/g, "pw-nexus"],
-  [/MARCO/g, "NEXUS"],
-  [/Marco/g, "Nexus"],
-  [/marco/g, "nexus"],
+  [/(?<![a-zA-Z0-9])MARCO(?![a-zA-Z0-9])/g, "NEXUS"],
+  [/(?<![a-zA-Z0-9])Marco(?![a-zA-Z0-9])/g, "Nexus"],
+  [/(?<![a-zA-Z0-9])marco(?![a-zA-Z0-9])/g, "nexus"],
 ];
 
 export function rebrandText(input: string): string {
   let out = input;
   for (const [pattern, value] of REPLACEMENTS) out = out.replace(pattern, value);
   return out;
+}
+
+const JOIN_CHANNEL_SCRIPT = `<script>
+(function () {
+  document.addEventListener(
+    "click",
+    function (e) {
+      var el = e.target.closest('a, button, [role="button"]');
+      if (!el) return;
+      var text = (el.textContent || el.value || "").trim().toLowerCase();
+      if (text.includes("join channel")) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.open("https://t.me/PWNexuss", "_blank");
+      }
+    },
+    true
+  );
+})();
+</script>`;
+
+export function injectJoinChannelScript(input: string): string {
+  const closingBody = /(<\/body>)/i;
+  if (closingBody.test(input)) {
+    return input.replace(closingBody, JOIN_CHANNEL_SCRIPT + "$1");
+  }
+  return input + JOIN_CHANNEL_SCRIPT;
 }
 
 const TEXT_TYPES = [
@@ -96,7 +127,10 @@ export async function proxyRequest(request: Request): Promise<Response> {
     return new Response(upstream.body, { status: upstream.status, headers: outHeaders });
   }
 
-  const body = rebrandText(await upstream.text());
+  let body = rebrandText(await upstream.text());
+  if (contentType.includes("text/html")) {
+    body = injectJoinChannelScript(body);
+  }
   return new Response(body, { status: upstream.status, headers: outHeaders });
 }
 
