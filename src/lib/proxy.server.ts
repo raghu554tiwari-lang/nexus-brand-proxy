@@ -79,16 +79,50 @@ const STRIP_RESPONSE_HEADERS = [
   "strict-transport-security",
 ];
 
+// Only these request headers are forwarded upstream. Forwarding everything let
+// Vercel-specific headers/cookies (deployment pinning, x-forwarded-*) leak through
+// and made the upstream answer "404 DEPLOYMENT_NOT_FOUND" on the published domain.
+const FORWARD_REQUEST_HEADERS = [
+  "accept",
+  "accept-language",
+  "authorization",
+  "content-type",
+  "range",
+  "user-agent",
+  "x-requested-with",
+];
+
+// Vercel pins requests to a specific (possibly deleted) deployment via these cookies.
+const STRIP_COOKIES = ["__vdpl", "__vdpl_", "__vercel_deployment_id", "_vercel_jwt"];
+
+function sanitizeCookie(cookie: string): string {
+  return cookie
+    .split(/;\s*/)
+    .filter((part) => {
+      const name = part.split("=")[0]?.trim() ?? "";
+      return part && !STRIP_COOKIES.includes(name);
+    })
+    .join("; ");
+}
+
 export async function proxyRequest(request: Request): Promise<Response> {
   const incoming = new URL(request.url);
   const target = new URL(incoming.pathname + incoming.search, UPSTREAM);
 
-  const headers = new Headers(request.headers);
-  headers.delete("host");
-  headers.delete("connection");
+  const headers = new Headers();
+  for (const key of FORWARD_REQUEST_HEADERS) {
+    const value = request.headers.get(key);
+    if (value) headers.set(key, value);
+  }
+  const cookie = request.headers.get("cookie");
+  if (cookie) {
+    const cleaned = sanitizeCookie(cookie);
+    if (cleaned) headers.set("cookie", cleaned);
+  }
   headers.set("accept-encoding", "identity");
   headers.set("origin", UPSTREAM);
   headers.set("referer", UPSTREAM + incoming.pathname);
+
 
   const hasBody = !["GET", "HEAD"].includes(request.method);
 
@@ -106,6 +140,21 @@ export async function proxyRequest(request: Request): Promise<Response> {
 
   const outHeaders = new Headers(upstream.headers);
   for (const key of STRIP_RESPONSE_HEADERS) outHeaders.delete(key);
+
+  // Never let deployment-pinning cookies reach the browser: they cause
+  // "404 DEPLOYMENT_NOT_FOUND" once that upstream deployment is gone.
+  const setCookies = (upstream.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie
+    ? (upstream.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+    : [];
+  if (setCookies.length) {
+    outHeaders.delete("set-cookie");
+    for (const value of setCookies) {
+      const name = value.split("=")[0]?.trim() ?? "";
+      if (STRIP_COOKIES.includes(name)) continue;
+      outHeaders.append("set-cookie", value);
+    }
+  }
+
 
   // Keep redirects on this domain.
   const location = upstream.headers.get("location");
